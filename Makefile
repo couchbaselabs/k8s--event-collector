@@ -2,24 +2,21 @@ BUILDDIR := build/bin
 
 VERSION ?= 0.1.0
 
-.PHONY: bins image
-all: | $(BUILDDIR)
-	go build -o build/bin/main cmd/event-logger/main.go
+.PHONY: all
+all: bins images
 
 .PHONY:
-image: bins
-	docker build -t couchbase/event-logger:$(VERSION) .
+images: bins
+	docker buildx build --platform linux/arm64 --build-arg TARGET=kubernetes-linux-arm64 --load --build-arg GO_VERSION=1.20.8 --build-arg VERSION=2.6.0 --build-arg BLD_NUM=999 -t couchbase/event-collector:$(VERSION) .
 
 
 .PHONY: bins
 bins: | $(BUILDDIR)
-	go build -o build/bin/main cmd/event-logger/main.go
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o build/bin/main cmd/event-collector/main.go
 
-compile:
-	echo "Compiling for every OS and Platform"
-	GOOS=linux GOARCH=arm go build -o bin/main-linux-arm main.go
-	GOOS=linux GOARCH=arm64 go build -o bin/main-linux-arm64 main.go
-	GOOS=freebsd GOARCH=386 go build -o bin/main-freebsd-386 main.go
+.PHONY: kind-images
+kind-images: images
+	kind load docker-image couchbase/event-collector:$(VERSION)
 
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)

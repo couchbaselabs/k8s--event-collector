@@ -1,4 +1,4 @@
-package elogger
+package evcol
 
 import (
 	"testing"
@@ -50,7 +50,7 @@ func TestEventTracking(t *testing.T) {
 		t.Errorf("The buffer ring should be of size: %v", bufferSize)
 	}
 
-	if len(b.s) != bufferSize {
+	if b.Capacity() != bufferSize {
 		t.Errorf("The buffer set should be of size: %v", bufferSize)
 	}
 }

@@ -1,0 +1,102 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: default
+  name: event-collector
+rules:
+- apiGroups: ["*"] # "" indicates the core API group
+  resources: ["*"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["*"] # "" indicates the core API group
+  resources: ["events"]
+  verbs: ["create"]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: event-collector
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+# This role binding allows "jane" to read pods in the "default" namespace.
+# You need to already have a Role named "pod-reader" in that namespace.
+kind: RoleBinding
+metadata:
+  name: read-logs
+  namespace: default
+subjects:
+- kind: ServiceAccount
+  name: event-collector 
+roleRef:
+  kind: Role
+  name: event-collector
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: event-collector-conf
+data:
+  config.yaml: |
+    bufferSize: 1000
+    dumpCompletionPlugins:
+      kubernetesEvent:
+        enabled: false
+    eventFilters:
+    - apiVersion: couchbase.com/v2
+    - labels:
+      - key: app
+        value: couchbase
+    - labels:
+      - key: app
+        value: couchbase-operator
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: event-collector-deployment
+  labels:
+    app: event-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: event-collector
+  template:
+    metadata:
+      labels:
+        app: event-collector
+    spec:
+      serviceAccountName: event-collector
+      containers:
+      - name: event-collector
+        image: couchbase/event-collector:0.1.0
+        resources:
+          limits:
+            cpu:     100m
+            memory:  100Mi
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - mountPath: /tmp
+          name: dump-volume
+        - mountPath: /etc/eventcollector
+          name: config
+        readinessProbe:
+          httpGet:
+            path: /dumps
+            port: 8080
+          initialDelaySeconds: 3
+          periodSeconds: 3
+        env:  
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+      volumes:
+      - name: dump-volume
+        emptyDir:
+          sizeLimit: 500Mi
+      - name: config
+        configMap:
+          name: event-collector-conf

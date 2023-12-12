@@ -1,4 +1,4 @@
-package elogger
+package evcol
 
 import (
 	"container/ring"
@@ -6,6 +6,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
+
+// TODO: Add file backed event buffer that cachces to a file every X minutes
+// If used in conjunction with a PV then the buffer will be resilient
+// to pod restarts
 
 // The EventBuffer interface is a basic interface to interact with a buffer
 // for storing events
