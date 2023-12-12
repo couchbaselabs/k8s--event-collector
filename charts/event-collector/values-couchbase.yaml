@@ -1,0 +1,19 @@
+# Default values for helm.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+appName: event-collector
+serverPort: 8080
+bufferSize: 100
+
+image:
+  repository: couchbase/event-collector
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+
+eventFilters:
+- apiVersion: couchbase.com/v2
+- labels:
+  - app: couchbase
+- labels:
+  - app: couchbase-operator

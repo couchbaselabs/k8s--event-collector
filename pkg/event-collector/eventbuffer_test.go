@@ -1,7 +1,8 @@
-package elogger
+package evcol
 
 import (
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -50,7 +51,28 @@ func TestEventTracking(t *testing.T) {
 		t.Errorf("The buffer ring should be of size: %v", bufferSize)
 	}
 
-	if len(b.s) != bufferSize {
+	if b.Capacity() != bufferSize {
 		t.Errorf("The buffer set should be of size: %v", bufferSize)
+	}
+}
+
+func TestConcurrentAccess(t *testing.T) {
+	bufferSize := 4
+	b := NewRingEventBuffer(bufferSize)
+	e := createEvent()
+	b.Add(&e)
+
+	go b.Do(func(_ *corev1.Event) {
+		time.Sleep(1 * time.Second)
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	e = createEvent()
+	go b.Add(&e)
+
+	time.Sleep(500 * time.Millisecond)
+
+	if len(b.s) != 1 {
+		t.Errorf("The buffer ring should be of size: %v", bufferSize)
 	}
 }

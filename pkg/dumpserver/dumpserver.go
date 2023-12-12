@@ -1,16 +1,26 @@
-package elogger
+package dumpserver
 
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
+	"time"
 
-	"github.com/couchbase/couchbase-operator/pkg/info/util"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
+
+// The Dumper interface provides dumps for DumpServer to manage
+type Dumper interface {
+	Dump(io.Writer) error
+}
+
+var log = logf.Log.WithName("dump-server")
+
+var tsFormat = "20060102T150405"
 
 // DumpStatus represents the status of a buffer Dump
 type DumpStatus string
@@ -24,16 +34,27 @@ const (
 	DumpFailed DumpStatus = "Failed"
 )
 
+// DumpCompletionFunc takes a certain action based on the event that triggered it
+type DumpCompletionFunc func(d *Dump)
+
 // Dump is a dump of the event buffer
 type Dump struct {
 	Status DumpStatus
+	Name   string
 }
 
 // DumpServer serves an API to trigger and fetch dumps
 type DumpServer struct {
 	mux    *http.ServeMux
-	logger *EventLogger
+	dumper Dumper
 	dumps  map[string]*Dump
+
+	// These are callbacks used to trigger notifications when dumps are complete
+	dumpCompleteCallbacks []DumpCompletionFunc
+
+	dumpDir string
+
+	dumpPrefix string
 }
 
 const dumpDir = "/tmp/"
@@ -41,11 +62,13 @@ const dumpFileExtension = ".json"
 const dumpPrefix = "event-log-"
 
 // NewDumpServer creates a new DumpServer
-func NewDumpServer(logger *EventLogger) *DumpServer {
+func NewDumpServer(dumper Dumper) *DumpServer {
 	dm := DumpServer{
-		mux:    http.NewServeMux(),
-		logger: logger,
-		dumps:  make(map[string]*Dump),
+		mux:        http.NewServeMux(),
+		dumper:     dumper,
+		dumps:      make(map[string]*Dump),
+		dumpDir:    dumpDir,
+		dumpPrefix: dumpPrefix,
 	}
 
 	dm.loadExistingFileDumps()
@@ -56,20 +79,21 @@ func NewDumpServer(logger *EventLogger) *DumpServer {
 	return &dm
 }
 
+// AddCompletionCallback adds a completion callback
+func (dm *DumpServer) AddCompletionCallback(callback DumpCompletionFunc) {
+	dm.dumpCompleteCallbacks = append(dm.dumpCompleteCallbacks, callback)
+}
+
 func (dm *DumpServer) loadExistingFileDumps() {
-	dirs, err := os.ReadDir(dumpDir)
+	dirs, err := os.ReadDir(dm.dumpDir)
 
 	if err != nil {
 		log.Error(err, "Couldn't read dump directory, no existing dumps loaded")
 	}
 
 	for _, d := range dirs {
-		if d.IsDir() {
-			continue
-		}
-
-		if strings.HasPrefix(d.Name(), dumpPrefix) {
-			dm.dumps[d.Name()] = &Dump{DumpComplete}
+		if !d.IsDir() && strings.HasPrefix(d.Name(), dm.dumpPrefix) {
+			dm.dumps[d.Name()] = &Dump{Status: DumpComplete, Name: d.Name()}
 		}
 	}
 }
@@ -90,7 +114,7 @@ func (dm *DumpServer) handleGetDumps(rw http.ResponseWriter, r *http.Request) {
 }
 
 func (dm *DumpServer) handlePostDumps(rw http.ResponseWriter, r *http.Request) {
-	dumpName := dumpPrefix + util.Timestamp()
+	dumpName := dm.dumpPrefix + time.Now().Format(tsFormat)
 
 	if _, exists := dm.dumps[dumpName]; exists {
 		log.Error(fmt.Errorf("Dump %s already exists", dumpName), "Dump creation failed")
@@ -126,10 +150,7 @@ func (dm *DumpServer) handleGetDump(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filePath := dm.logger.getDumpLocation(dumpName)
-	_, filename := filepath.Split(filePath)
-
-	rw.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(filename))
+	filePath := dm.getDumpLocation(dumpName)
 	rw.Header().Set("Content-Type", "application/json")
 	http.ServeFile(rw, r, filePath)
 }
@@ -137,9 +158,12 @@ func (dm *DumpServer) handleGetDump(rw http.ResponseWriter, r *http.Request) {
 func (dm *DumpServer) createFileDump(dumpName string) {
 	log.Info("Creating event dump", "dump-name", dumpName)
 
-	dm.dumps[dumpName] = &Dump{
+	d := &Dump{
 		Status: DumpStarted,
+		Name:   dumpName,
 	}
+
+	dm.dumps[dumpName] = d
 
 	dumpStatus := DumpFailed
 
@@ -148,7 +172,8 @@ func (dm *DumpServer) createFileDump(dumpName string) {
 		dm.dumps[dumpName].Status = dumpStatus
 	}()
 
-	f, err := os.Create(dumpDir + dumpName + dumpFileExtension)
+	filePath := filepath.Join(dm.dumpDir, dumpName) + dumpFileExtension
+	f, err := os.Create(filePath)
 
 	if err != nil {
 		log.Error(err, "Failed to create dump file")
@@ -157,7 +182,7 @@ func (dm *DumpServer) createFileDump(dumpName string) {
 
 	defer f.Close()
 
-	err = dm.logger.dump(f)
+	err = dm.dumper.Dump(f)
 
 	if err != nil {
 		log.Error(err, "Error writing dump to file")
@@ -165,6 +190,9 @@ func (dm *DumpServer) createFileDump(dumpName string) {
 	}
 
 	dumpStatus = DumpComplete
+
+	log.Info("Executing Complete Functions", "dump-name", dumpName)
+	dm.execDumpCompleteFuncs(d)
 }
 
 func (dm *DumpServer) handleGetBuffer(rw http.ResponseWriter, r *http.Request) {
@@ -172,9 +200,9 @@ func (dm *DumpServer) handleGetBuffer(rw http.ResponseWriter, r *http.Request) {
 		rw.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	rw.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(dumpPrefix+util.Timestamp()+dumpFileExtension))
+
 	rw.Header().Set("Content-Type", "application/json")
-	err := dm.logger.dump(rw)
+	err := dm.dumper.Dump(rw)
 
 	if err != nil {
 		rw.WriteHeader(http.StatusInternalServerError)
@@ -183,7 +211,7 @@ func (dm *DumpServer) handleGetBuffer(rw http.ResponseWriter, r *http.Request) {
 
 // CreateBufferDump creates a dump of the buffer
 func (dm *DumpServer) CreateBufferDump() {
-	dumpName := dumpPrefix + util.Timestamp()
+	dumpName := dm.dumpPrefix + time.Now().Format(tsFormat)
 
 	if _, exists := dm.dumps[dumpName]; exists {
 		log.Error(fmt.Errorf("Dump %s already exists", dumpName), "Dump creation failed")
@@ -195,8 +223,18 @@ func (dm *DumpServer) CreateBufferDump() {
 	dm.createFileDump(dumpName)
 }
 
+func (dm *DumpServer) execDumpCompleteFuncs(d *Dump) {
+	for _, callback := range dm.dumpCompleteCallbacks {
+		callback(d)
+	}
+}
+
+func (dm *DumpServer) getDumpLocation(dumpName string) string {
+	return filepath.Join(dm.dumpDir, dumpName) + dumpFileExtension
+}
+
 // Run starts the server
 func (dm *DumpServer) Run(port string) {
-	log.Info("Starting Dump Server 2", "port", port)
+	log.Info("Starting Dump Server", "port", port)
 	http.ListenAndServe(":"+port, dm.mux)
 }

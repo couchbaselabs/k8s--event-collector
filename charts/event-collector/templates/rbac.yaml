@@ -1,0 +1,32 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: {{ .Release.Namespace }}
+  name: event-collector
+rules:
+- apiGroups: ["*"] 
+  resources: ["*"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create"]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: event-collector
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: read-logs
+  namespace: {{ .Release.Namespace }}
+subjects:
+- kind: ServiceAccount
+  name: event-collector 
+roleRef:
+  kind: Role
+  name: event-collector
+  apiGroup: rbac.authorization.k8s.io
+---

@@ -1,10 +1,8 @@
 FROM scratch
 
-
 COPY License.txt /License.txt
-COPY README.txt /README.txt
-COPY build/bin/main /usr/local/bin/event-logger
+COPY build/bin/main /usr/local/bin/event-collector
 
 USER 8453
 
-ENTRYPOINT ["/usr/local/bin/event-logger"]
+ENTRYPOINT ["/usr/local/bin/event-collector"]
