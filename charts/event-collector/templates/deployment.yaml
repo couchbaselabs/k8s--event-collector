@@ -1,0 +1,65 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: event-collector-conf
+data:
+  config.yaml: |
+    bufferSize: {{ .Values.bufferSize }}
+    port: {{ .Values.serverPort }}
+    dumpCompletionPlugins:
+      kubernetesEvent:
+        enabled: false
+    {{ if .Values.eventFilters -}}
+    eventFilters:
+    {{- toYaml .Values.eventFilters | nindent 4 }}
+    {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.appName }}
+  labels:
+    app: event-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: event-collector
+  template:
+    metadata:
+      labels:
+        app: event-collector
+    spec:
+      serviceAccountName: event-collector
+      containers:
+      - name: event-collector
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+        resources:
+          limits:
+            cpu:     100m
+            memory:  100Mi
+        ports:
+        - containerPort: {{ .Values.serverPort }}
+        volumeMounts:
+        - mountPath: /tmp
+          name: dump-volume
+        - mountPath: /etc/eventcollector
+          name: config
+        readinessProbe:
+          httpGet:
+            path: /dumps
+            port: {{ .Values.serverPort }}
+          initialDelaySeconds: 3
+          periodSeconds: 3
+        env:  
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+      volumes:
+      - name: dump-volume
+        emptyDir:
+          sizeLimit: 500Mi
+      - name: config
+        configMap:
+          name: event-collector-conf

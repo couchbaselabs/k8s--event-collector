@@ -35,3 +35,5 @@ scripts/venv/
 package-lock.json
 /.vscode/
 
+coverage.out
+cmd/event-collector/config.yaml

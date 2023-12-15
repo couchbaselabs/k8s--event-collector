@@ -1,11 +1,16 @@
-package elogger
+package evcol
 
 import (
 	"container/ring"
+	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
+
+// TODO: Add file backed event buffer that cachces to a file every X minutes
+// If used in conjunction with a PV then the buffer will be resilient
+// to pod restarts
 
 // The EventBuffer interface is a basic interface to interact with a buffer
 // for storing events
@@ -19,8 +24,9 @@ type EventBuffer interface {
 // The RingEventBuffer is a simple deduplicating buffer to store events in a ring,
 // the ring structure means old events will be overwritten by new events.
 type RingEventBuffer struct {
-	r *ring.Ring
-	s map[types.UID]bool
+	r  *ring.Ring
+	s  map[types.UID]bool
+	mx sync.RWMutex
 }
 
 // NewRingEventBuffer creates a new event buffer of size `bufferSize`
@@ -35,6 +41,8 @@ func NewRingEventBuffer(bufferSize int) *RingEventBuffer {
 
 // Add add's an event to the buffer
 func (b *RingEventBuffer) Add(e *corev1.Event) {
+	b.mx.Lock()
+	defer b.mx.Unlock()
 	if _, exists := b.s[e.UID]; exists {
 		return
 	}
@@ -52,6 +60,8 @@ func (b *RingEventBuffer) Add(e *corev1.Event) {
 
 // Do performs a function on all events in the buffer
 func (b *RingEventBuffer) Do(f func(*corev1.Event)) {
+	b.mx.Lock()
+	defer b.mx.Unlock()
 	b.r.Do(func(v any) {
 		if v == nil {
 			return
@@ -62,10 +72,14 @@ func (b *RingEventBuffer) Do(f func(*corev1.Event)) {
 
 // Capacity returns the max capacity of the buffer
 func (b *RingEventBuffer) Capacity() int {
+	b.mx.RLock()
+	defer b.mx.RUnlock()
 	return b.r.Len()
 }
 
 // Size returns the number of events currently in the buffer
 func (b *RingEventBuffer) Size() int {
+	b.mx.RLock()
+	defer b.mx.RUnlock()
 	return len(b.s)
 }
