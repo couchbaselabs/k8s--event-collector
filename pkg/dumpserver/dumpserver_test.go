@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
 const TestFilePrefix = "testPrefix"
@@ -51,8 +55,6 @@ func TestCreateDump(t *testing.T) {
 	ds, _, testdir := initTestEnv(t)
 	defer os.RemoveAll(testdir)
 
-	ds.dumpDir = testdir
-	ds.dumpPrefix = TestFilePrefix
 	mustCreateDump(t, ds)
 	validateDumpCreated(t, 1, testdir)
 }
@@ -61,11 +63,11 @@ func TestCreateAndGetDump(t *testing.T) {
 	ds, testDumper, testdir := initTestEnv(t)
 	defer os.RemoveAll(testdir)
 
-	expectedNumDUmps := 1
+	expectedNumDumps := 1
 	mustCreateDump(t, ds)
-	validateDumpCreated(t, expectedNumDUmps, testdir)
+	validateDumpCreated(t, expectedNumDumps, testdir)
 
-	dumps := validateGetDumps(t, ds, expectedNumDUmps)
+	dumps := validateGetDumps(t, ds, expectedNumDumps)
 	var dumpName string
 	for dump := range dumps {
 		dumpName = dump
@@ -89,38 +91,6 @@ func TestGetDumpInvalidMethod(t *testing.T) {
 	if status := rr.Code; status != http.StatusBadRequest {
 		t.Errorf("handler returned wrong status code: got %v want %v",
 			status, http.StatusCreated)
-	}
-}
-
-func TestGetDumpWhilstInProgress(t *testing.T) {
-	ds, _, testdir := initTestEnv(t)
-	defer os.RemoveAll(testdir)
-
-	ds.dumper = &testWaitDumper{}
-	mustCreateDump(t, ds)
-	time.Sleep(200 * time.Millisecond)
-	dumps := validateGetDumps(t, ds, 1)
-
-	var dump *Dump
-	for _, d := range dumps {
-		dump = d
-	}
-
-	if dump.Status != DumpStarted {
-		t.Errorf("Expected dump to have status: %s", DumpStarted)
-	}
-	rr := httptest.NewRecorder()
-
-	request, err := http.NewRequest("GET", "/dumps/"+dump.Name, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	ds.mux.ServeHTTP(rr, request)
-
-	if status := rr.Code; status != http.StatusMethodNotAllowed {
-		t.Errorf("handler returned wrong status code: got %v want %v",
-			status, http.StatusMethodNotAllowed)
 	}
 }
 
@@ -255,10 +225,10 @@ func TestDumpCompletionFunc(t *testing.T) {
 	ds.AddCompletionCallback(func(d *Dump) { count++ })
 
 	mustCreateDump(t, ds)
+	time.Sleep(time.Second)
 	mustCreateDump(t, ds)
 
 	// Wait for file IO
-	time.Sleep(200 * time.Millisecond)
 
 	if count != 2 {
 		t.Errorf("Expected the callback to be called twice")
@@ -274,8 +244,13 @@ func TestLoadingExistingDumps(t *testing.T) {
 	}
 
 	dumpsToLoad := 3
+	dumpNames := map[string]bool{}
 	for i := 0; i < dumpsToLoad; i++ {
-		f, err := os.Create(filepath.Join(testdir, fmt.Sprintf("%s-%v", TestFilePrefix, i)))
+		time.Sleep(time.Second)
+		dumpName := fmt.Sprintf("%s-%v", TestFilePrefix, i)
+		dumpNames[dumpName] = true
+		dumpFile := dumpName + ".json"
+		f, err := os.Create(filepath.Join(testdir, dumpFile))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -285,11 +260,44 @@ func TestLoadingExistingDumps(t *testing.T) {
 	if numDumps := len(ds.dumps); numDumps != 3 {
 		t.Errorf("expected ds to have %v dumps but found: %v", dumpsToLoad, numDumps)
 	}
+
+	for dump := range dumpNames {
+		if _, ok := ds.dumps[dump]; !ok {
+			t.Errorf("expected ds to have dump %s", dump)
+		}
+	}
+}
+
+func TestMaxDumps(t *testing.T) {
+	ds, _, testdir := initTestEnv(t)
+	defer os.RemoveAll(testdir)
+
+	if numDumps := len(ds.dumps); numDumps != 0 {
+		t.Errorf("expected ds to start with 0 dumps but found: %v", numDumps)
+	}
+	ds.maxDumps = 2
+
+	dumpsToTake := 5
+
+	dumpNames := make([]string, dumpsToTake)
+	for i := 0; i < dumpsToTake; i++ {
+		time.Sleep(time.Second)
+		rr := mustCreateDump(t, ds)
+		validateDumpCreated(t, int(math.Min(float64(ds.maxDumps), float64(i+1))), testdir)
+		dumpName, err := io.ReadAll(rr.Result().Body)
+		if err != nil {
+			t.Fatal(err)
+			dumpNames[i] = string(dumpName)
+		}
+	}
+
 }
 
 func initTestEnv(t *testing.T) (*DumpServer, *testDumper, string) {
+	logf.SetLogger(zap.New(zap.UseDevMode(true)))
+
 	testDumper := &testDumper{"data"}
-	ds := NewDumpServer(testDumper)
+	ds := NewDumpServer(testDumper, 10)
 	dir, err := os.MkdirTemp("", "testtmp")
 	if err != nil {
 		t.Fatal(err)
@@ -313,7 +321,7 @@ func mustCreateDump(t *testing.T, ds *DumpServer) *httptest.ResponseRecorder {
 
 func validateDumpCreated(t *testing.T, expectedNumDumps int, dir string) {
 	// Wait a bit for file IO to happen
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(600 * time.Millisecond)
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -327,8 +335,8 @@ func validateDumpCreated(t *testing.T, expectedNumDumps int, dir string) {
 		}
 	}
 
-	if filesFound != 1 {
-		t.Errorf("dump server created expected to create 1 dump but got %v", filesFound)
+	if filesFound != expectedNumDumps {
+		t.Errorf("dump server created expected to create %v dump but got %v", expectedNumDumps, filesFound)
 	}
 }
 

@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -45,16 +47,18 @@ type Dump struct {
 
 // DumpServer serves an API to trigger and fetch dumps
 type DumpServer struct {
-	mux    *http.ServeMux
-	dumper Dumper
-	dumps  map[string]*Dump
+	mux        *http.ServeMux
+	dumper     Dumper
+	dumps      map[string]*Dump
+	dumpsMutex sync.RWMutex
 
 	// These are callbacks used to trigger notifications when dumps are complete
 	dumpCompleteCallbacks []DumpCompletionFunc
 
-	dumpDir string
-
+	dumpDir    string
 	dumpPrefix string
+
+	maxDumps int
 }
 
 const dumpDir = "/tmp/"
@@ -62,13 +66,14 @@ const dumpFileExtension = ".json"
 const dumpPrefix = "event-log-"
 
 // NewDumpServer creates a new DumpServer
-func NewDumpServer(dumper Dumper) *DumpServer {
+func NewDumpServer(dumper Dumper, maxDumps int) *DumpServer {
 	dm := DumpServer{
 		mux:        http.NewServeMux(),
 		dumper:     dumper,
 		dumps:      make(map[string]*Dump),
 		dumpDir:    dumpDir,
 		dumpPrefix: dumpPrefix,
+		maxDumps:   maxDumps,
 	}
 
 	dm.loadExistingFileDumps()
@@ -85,6 +90,8 @@ func (dm *DumpServer) AddCompletionCallback(callback DumpCompletionFunc) {
 }
 
 func (dm *DumpServer) loadExistingFileDumps() {
+	dm.dumpsMutex.Lock()
+	defer dm.dumpsMutex.Unlock()
 	dirs, err := os.ReadDir(dm.dumpDir)
 
 	if err != nil {
@@ -93,7 +100,8 @@ func (dm *DumpServer) loadExistingFileDumps() {
 
 	for _, d := range dirs {
 		if !d.IsDir() && strings.HasPrefix(d.Name(), dm.dumpPrefix) {
-			dm.dumps[d.Name()] = &Dump{Status: DumpComplete, Name: d.Name()}
+			dumpeName, _ := strings.CutSuffix(d.Name(), dumpFileExtension)
+			dm.dumps[dumpeName] = &Dump{Status: DumpComplete, Name: dumpeName}
 		}
 	}
 }
@@ -110,25 +118,51 @@ func (dm *DumpServer) handleDumps(rw http.ResponseWriter, r *http.Request) {
 }
 
 func (dm *DumpServer) handleGetDumps(rw http.ResponseWriter, r *http.Request) {
+	dm.dumpsMutex.RLock()
+	defer dm.dumpsMutex.RUnlock()
 	json.NewEncoder(rw).Encode(dm.dumps)
 }
 
 func (dm *DumpServer) handlePostDumps(rw http.ResponseWriter, r *http.Request) {
 	dumpName := dm.dumpPrefix + time.Now().Format(tsFormat)
 
-	if _, exists := dm.dumps[dumpName]; exists {
-		log.Error(fmt.Errorf("Dump %s already exists", dumpName), "Dump creation failed")
+	dm.purgeOldDumps(dm.maxDumps - 1)
+
+	if err := dm.createFileDump(dumpName); err != nil {
 		rw.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-
-	log.Info("Creating events dump", "dump-name", dumpName)
-
 	rw.WriteHeader(http.StatusCreated)
 
-	go func() {
-		dm.createFileDump(dumpName)
-	}()
+	rw.Write([]byte(dumpName))
+}
+
+func (dm *DumpServer) purgeOldDumps(maxDumps int) {
+	dm.dumpsMutex.Lock()
+	defer dm.dumpsMutex.Unlock()
+	if len(dm.dumps) <= maxDumps {
+		return
+	}
+
+	dumpNames := make([]string, len(dm.dumps))
+
+	i := 0
+	for dump := range dm.dumps {
+		dumpNames[i] = dump
+		i++
+	}
+
+	slices.Sort(dumpNames)
+
+	dumpsToDelete := len(dm.dumps) - maxDumps
+
+	for i = 0; i < dumpsToDelete; i++ {
+		dumpName := dumpNames[i]
+		log.Info("Removing old dump", "dumpName", dumpName)
+		dumpLocation := dm.getDumpLocation(dumpName)
+		os.Remove(dumpLocation)
+		delete(dm.dumps, dumpName)
+	}
 }
 
 func (dm *DumpServer) handleGetDump(rw http.ResponseWriter, r *http.Request) {
@@ -139,6 +173,8 @@ func (dm *DumpServer) handleGetDump(rw http.ResponseWriter, r *http.Request) {
 
 	dumpName := strings.TrimPrefix(r.URL.Path, "/dumps/")
 
+	dm.dumpsMutex.RLock()
+	defer dm.dumpsMutex.RUnlock()
 	if dump, exists := dm.dumps[dumpName]; !exists || dump.Status == DumpFailed {
 		rw.WriteHeader(http.StatusNotFound)
 		return
@@ -155,12 +191,20 @@ func (dm *DumpServer) handleGetDump(rw http.ResponseWriter, r *http.Request) {
 	http.ServeFile(rw, r, filePath)
 }
 
-func (dm *DumpServer) createFileDump(dumpName string) {
+func (dm *DumpServer) createFileDump(dumpName string) error {
+	dm.dumpsMutex.Lock()
+	defer dm.dumpsMutex.Unlock()
 	log.Info("Creating event dump", "dump-name", dumpName)
 
 	d := &Dump{
 		Status: DumpStarted,
 		Name:   dumpName,
+	}
+
+	if _, exists := dm.dumps[dumpName]; exists {
+		err := fmt.Errorf("Dump %s already exists", dumpName)
+		log.Error(err, "Dump creation failed")
+		return err
 	}
 
 	dm.dumps[dumpName] = d
@@ -177,7 +221,7 @@ func (dm *DumpServer) createFileDump(dumpName string) {
 
 	if err != nil {
 		log.Error(err, "Failed to create dump file")
-		return
+		return err
 	}
 
 	defer f.Close()
@@ -186,13 +230,14 @@ func (dm *DumpServer) createFileDump(dumpName string) {
 
 	if err != nil {
 		log.Error(err, "Error writing dump to file")
-		return
+		return err
 	}
 
 	dumpStatus = DumpComplete
 
 	log.Info("Executing Complete Functions", "dump-name", dumpName)
-	dm.execDumpCompleteFuncs(d)
+	go dm.execDumpCompleteFuncs(d)
+	return nil
 }
 
 func (dm *DumpServer) handleGetBuffer(rw http.ResponseWriter, r *http.Request) {
@@ -212,13 +257,6 @@ func (dm *DumpServer) handleGetBuffer(rw http.ResponseWriter, r *http.Request) {
 // CreateBufferDump creates a dump of the buffer
 func (dm *DumpServer) CreateBufferDump() {
 	dumpName := dm.dumpPrefix + time.Now().Format(tsFormat)
-
-	if _, exists := dm.dumps[dumpName]; exists {
-		log.Error(fmt.Errorf("Dump %s already exists", dumpName), "Dump creation failed")
-		return
-	}
-
-	log.Info("Creating events dump", "dump-name", dumpName)
 
 	dm.createFileDump(dumpName)
 }

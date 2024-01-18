@@ -53,7 +53,7 @@ func main() {
 	addActionFunc(&eventcollector, cfg)
 
 	// Create and setup dumpServer
-	dumpServer := dumpserver.NewDumpServer(&eventcollector)
+	dumpServer := dumpserver.NewDumpServer(&eventcollector, cfg.MaxDumps)
 	eventcollector.ActionCallback = func(in *corev1.Event) {
 		dumpServer.CreateBufferDump()
 	}
@@ -81,6 +81,10 @@ func addActionFunc(el *evcol.EventCollector, cfg config.EventCollectorConfigurat
 			}
 
 			return configFilterFunc(in)
+		}
+	} else if cfg.DumpOnWarnings {
+		el.ActionFilterFunc = func(in *corev1.Event) bool {
+			return in.Type == corev1.EventTypeWarning
 		}
 	}
 }
@@ -133,6 +137,7 @@ func loadConfig() config.EventCollectorConfiguration {
 
 	viper.SetDefault("bufferSize", 100)
 	viper.SetDefault("port", "8080")
+	viper.SetDefault("maxDumps", "20")
 
 	if err != nil {
 		log.Info("WARN: Failed to read config file", "error", err)

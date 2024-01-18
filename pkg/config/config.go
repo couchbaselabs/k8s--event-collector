@@ -6,7 +6,9 @@ type EventCollectorConfiguration struct {
 	BufferSize            int                             `yaml:"bufferSize"`
 	DumpCompletionPlugins *CompletionPluginsConfiguration `yaml:"dumpCompletionPlugins"`
 	EventFilters          []KubernetesResourceFilter      `yaml:"eventFilter"`
-	DumpTrigger           *DumpTriggerConfiguration
+	DumpOnWarnings        bool                            `yaml:"dumpOnWarningEvents"`
+	DumpTrigger           *DumpTriggerConfiguration       `yaml:"dumpTriggers"`
+	MaxDumps              int                             `yaml:"maxDumps"`
 }
 
 // CompletionPluginsConfiguration is the config for the plugins
@@ -21,9 +23,9 @@ type KubernetesEventCompletionConfiguration struct {
 
 // KubernetesResourceFilter is a simple config to filter events based on API version, resource kind and/or labels
 type KubernetesResourceFilter struct {
-	APIVersion string `yaml:"apiVersion"`
-	Resource   string
-	Labels     map[string]string
+	APIVersion string            `yaml:"apiVersion"`
+	Resource   string            `yaml:"resource"`
+	Labels     map[string]string `yaml:"labels"`
 }
 
 // DumpTriggerConfiguration is a config for triggering automated dumps
