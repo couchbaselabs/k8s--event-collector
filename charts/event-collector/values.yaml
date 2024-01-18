@@ -10,3 +10,8 @@ image:
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
   tag: ""
+
+storage:
+  persistentVolume: false
+  storage: 500Mi
+  storageClassName: "standard"

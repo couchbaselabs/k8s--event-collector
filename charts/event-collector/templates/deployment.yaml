@@ -58,8 +58,13 @@ spec:
               fieldPath: metadata.name
       volumes:
       - name: dump-volume
+      {{- if .Values.storage.persistentVolume }}
+        persistentVolumeClaim:
+          claimName: pvc-{{ .Values.appName }}
+      {{- else }}
         emptyDir:
-          sizeLimit: 500Mi
+          sizeLimit: {{ .Values.storage.storage }}
+      {{- end }}
       - name: config
         configMap:
           name: event-collector-conf
