@@ -1,4 +1,4 @@
-package dumpserver
+package stashserver
 
 import (
 	"bytes"
@@ -20,68 +20,68 @@ import (
 
 const TestFilePrefix = "testPrefix"
 
-type testDumper struct {
-	dumpData string
+type testStasher struct {
+	stashData string
 }
 
-func (d *testDumper) Dump(w io.Writer) error {
-	w.Write([]byte(d.dumpData))
+func (d *testStasher) Stash(w io.Writer) error {
+	w.Write([]byte(d.stashData))
 	return nil
 }
 
-type testErrorDumper struct {
+type testErrorStasher struct {
 }
 
-func (d *testErrorDumper) Dump(w io.Writer) error {
+func (d *testErrorStasher) Stash(w io.Writer) error {
 	return fmt.Errorf("Very bad dangerous error")
 }
 
-type testWaitDumper struct {
+type testWaitStasher struct {
 }
 
-func (d *testWaitDumper) Dump(w io.Writer) error {
+func (d *testWaitStasher) Stash(w io.Writer) error {
 	time.Sleep(3 * time.Second)
 	return nil
 }
 
-func TestGetDumps(t *testing.T) {
+func TestGetStashes(t *testing.T) {
 	ds, _, testdir := initTestEnv(t)
 	defer os.RemoveAll(testdir)
 
-	validateGetDumps(t, ds, 0)
+	validateGetStashes(t, ds, 0)
 }
 
-func TestCreateDump(t *testing.T) {
+func TestCreateStash(t *testing.T) {
 	ds, _, testdir := initTestEnv(t)
 	defer os.RemoveAll(testdir)
 
-	mustCreateDump(t, ds)
-	validateDumpCreated(t, 1, testdir)
+	mustCreateStash(t, ds)
+	validateStashCreated(t, 1, testdir)
 }
 
-func TestCreateAndGetDump(t *testing.T) {
-	ds, testDumper, testdir := initTestEnv(t)
+func TestCreateAndGetStash(t *testing.T) {
+	ds, testStasher, testdir := initTestEnv(t)
 	defer os.RemoveAll(testdir)
 
-	expectedNumDumps := 1
-	mustCreateDump(t, ds)
-	validateDumpCreated(t, expectedNumDumps, testdir)
+	expectednumStashes := 1
+	mustCreateStash(t, ds)
+	validateStashCreated(t, expectednumStashes, testdir)
 
-	dumps := validateGetDumps(t, ds, expectedNumDumps)
-	var dumpName string
-	for dump := range dumps {
-		dumpName = dump
+	stashes := validateGetStashes(t, ds, expectednumStashes)
+	var stashName string
+	for stash := range stashes {
+		stashName = stash
 	}
-	validateGetDump(t, ds, dumpName, []byte(testDumper.dumpData))
+	validateGetStash(t, ds, stashName, []byte(testStasher.stashData))
 }
 
-func TestGetDumpInvalidMethod(t *testing.T) {
+func TestGetStashStashInvalidMethod(t *testing.T) {
 	ds, _, testdir := initTestEnv(t)
 	defer os.RemoveAll(testdir)
 
 	rr := httptest.NewRecorder()
 
-	request, err := http.NewRequest("POST", "/dumps/dump", nil)
+	request, err := http.NewRequest("POST", "/stashes/stash", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,17 +90,17 @@ func TestGetDumpInvalidMethod(t *testing.T) {
 
 	if status := rr.Code; status != http.StatusBadRequest {
 		t.Errorf("handler returned wrong status code: got %v want %v",
-			status, http.StatusCreated)
+			status, http.StatusBadRequest)
 	}
 }
 
-func TestGetDumpNonExistentDump(t *testing.T) {
+func TestGetStashNonExistentStash(t *testing.T) {
 	ds, _, testdir := initTestEnv(t)
 	defer os.RemoveAll(testdir)
 
 	rr := httptest.NewRecorder()
 
-	request, err := http.NewRequest("GET", "/dumps/fakedumpname", nil)
+	request, err := http.NewRequest("GET", "/stashes/fakestashname", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,26 +113,26 @@ func TestGetDumpNonExistentDump(t *testing.T) {
 	}
 }
 
-func TestGetErroredDump(t *testing.T) {
+func TestGetErroredStash(t *testing.T) {
 	ds, _, testdir := initTestEnv(t)
 	defer os.RemoveAll(testdir)
-	ds.dumper = &testErrorDumper{}
+	ds.stasher = &testErrorStasher{}
 
-	mustCreateDump(t, ds)
+	mustCreateStash(t, ds)
 	time.Sleep(100 * time.Millisecond)
-	dumps := validateGetDumps(t, ds, 1)
+	stashes := validateGetStashes(t, ds, 1)
 
-	var dump *Dump
-	for _, d := range dumps {
-		dump = d
+	var stash *Stash
+	for _, d := range stashes {
+		stash = d
 	}
 
-	if dump.Status != DumpFailed {
-		t.Errorf("Expected dump to have status: %s", DumpFailed)
+	if stash.Status != StashFailed {
+		t.Errorf("Expected stash to have status: %s", StashFailed)
 	}
 	rr := httptest.NewRecorder()
 
-	request, err := http.NewRequest("GET", "/dumps/"+dump.Name, nil)
+	request, err := http.NewRequest("GET", "/stashes/"+stash.Name, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestGetErroredDump(t *testing.T) {
 }
 
 func TestGetBuffer(t *testing.T) {
-	ds, testDumper, testdir := initTestEnv(t)
+	ds, testStasher, testdir := initTestEnv(t)
 	defer os.RemoveAll(testdir)
 
 	rr := httptest.NewRecorder()
@@ -164,8 +164,8 @@ func TestGetBuffer(t *testing.T) {
 	}
 
 	responseBody, err := io.ReadAll(rr.Result().Body)
-	if !bytes.Equal(responseBody, []byte(testDumper.dumpData)) {
-		t.Errorf("data expected in dump: %s , data found: %s", testDumper.dumpData, string(responseBody))
+	if !bytes.Equal(responseBody, []byte(testStasher.stashData)) {
+		t.Errorf("data expected in stash: %s , data found: %s", testStasher.stashData, string(responseBody))
 	}
 }
 
@@ -188,9 +188,9 @@ func TestInvalidGetBuffer(t *testing.T) {
 	}
 }
 
-func TestGetBufferDumpError(t *testing.T) {
+func TestGetBufferStashError(t *testing.T) {
 	ds, _, testdir := initTestEnv(t)
-	ds.dumper = &testErrorDumper{}
+	ds.stasher = &testErrorStasher{}
 	defer os.RemoveAll(testdir)
 
 	rr := httptest.NewRecorder()
@@ -208,25 +208,25 @@ func TestGetBufferDumpError(t *testing.T) {
 	}
 }
 
-func TestCreateBufferDump(t *testing.T) {
+func TestCreateBufferStash(t *testing.T) {
 	ds, _, testdir := initTestEnv(t)
 	defer os.RemoveAll(testdir)
 
-	ds.CreateBufferDump()
+	ds.CreateBufferStash()
 
-	validateDumpCreated(t, 1, testdir)
+	validateStashCreated(t, 1, testdir)
 }
 
-func TestDumpCompletionFunc(t *testing.T) {
+func TestStashCompletionFunc(t *testing.T) {
 	ds, _, testdir := initTestEnv(t)
 	defer os.RemoveAll(testdir)
 
 	count := 0
-	ds.AddCompletionCallback(func(d *Dump) { count++ })
+	ds.AddCompletionCallback(func(d *Stash) { count++ })
 
-	mustCreateDump(t, ds)
+	mustCreateStash(t, ds)
 	time.Sleep(time.Second)
-	mustCreateDump(t, ds)
+	mustCreateStash(t, ds)
 
 	// Wait for file IO
 
@@ -235,82 +235,82 @@ func TestDumpCompletionFunc(t *testing.T) {
 	}
 }
 
-func TestLoadingExistingDumps(t *testing.T) {
+func TestLoadingExistingStashes(t *testing.T) {
 	ds, _, testdir := initTestEnv(t)
 	defer os.RemoveAll(testdir)
 
-	if numDumps := len(ds.dumps); numDumps != 0 {
-		t.Errorf("expected ds to start with 0 dumps but found: %v", numDumps)
+	if numStashes := len(ds.stashes); numStashes != 0 {
+		t.Errorf("expected ds to start with 0 stashes but found: %v", numStashes)
 	}
 
-	dumpsToLoad := 3
-	dumpNames := map[string]bool{}
-	for i := 0; i < dumpsToLoad; i++ {
+	stashesToLoad := 3
+	stashNames := map[string]bool{}
+	for i := 0; i < stashesToLoad; i++ {
 		time.Sleep(time.Second)
-		dumpName := fmt.Sprintf("%s-%v", TestFilePrefix, i)
-		dumpNames[dumpName] = true
-		dumpFile := dumpName + ".json"
-		f, err := os.Create(filepath.Join(testdir, dumpFile))
+		stashName := fmt.Sprintf("%s-%v", TestFilePrefix, i)
+		stashNames[stashName] = true
+		stashFile := stashName + ".json"
+		f, err := os.Create(filepath.Join(testdir, stashFile))
 		if err != nil {
 			t.Fatal(err)
 		}
 		f.Close()
 	}
-	ds.loadExistingFileDumps()
-	if numDumps := len(ds.dumps); numDumps != 3 {
-		t.Errorf("expected ds to have %v dumps but found: %v", dumpsToLoad, numDumps)
+	ds.loadExistingFileStashes()
+	if numStashes := len(ds.stashes); numStashes != 3 {
+		t.Errorf("expected ds to have %v stahes but found: %v", stashesToLoad, numStashes)
 	}
 
-	for dump := range dumpNames {
-		if _, ok := ds.dumps[dump]; !ok {
-			t.Errorf("expected ds to have dump %s", dump)
+	for stash := range stashNames {
+		if _, ok := ds.stashes[stash]; !ok {
+			t.Errorf("expected ds to have stash %s", stash)
 		}
 	}
 }
 
-func TestMaxDumps(t *testing.T) {
+func TestMaxStashes(t *testing.T) {
 	ds, _, testdir := initTestEnv(t)
 	defer os.RemoveAll(testdir)
 
-	if numDumps := len(ds.dumps); numDumps != 0 {
-		t.Errorf("expected ds to start with 0 dumps but found: %v", numDumps)
+	if numStashes := len(ds.stashes); numStashes != 0 {
+		t.Errorf("expected ds to start with 0 stashes but found: %v", numStashes)
 	}
-	ds.maxDumps = 2
+	ds.maxStashes = 2
 
-	dumpsToTake := 5
+	stashesToTake := 5
 
-	dumpNames := make([]string, dumpsToTake)
-	for i := 0; i < dumpsToTake; i++ {
+	stashNames := make([]string, stashesToTake)
+	for i := 0; i < stashesToTake; i++ {
 		time.Sleep(time.Second)
-		rr := mustCreateDump(t, ds)
-		validateDumpCreated(t, int(math.Min(float64(ds.maxDumps), float64(i+1))), testdir)
-		dumpName, err := io.ReadAll(rr.Result().Body)
+		rr := mustCreateStash(t, ds)
+		validateStashCreated(t, int(math.Min(float64(ds.maxStashes), float64(i+1))), testdir)
+		stashName, err := io.ReadAll(rr.Result().Body)
 		if err != nil {
 			t.Fatal(err)
-			dumpNames[i] = string(dumpName)
+			stashNames[i] = string(stashName)
 		}
 	}
 
 }
 
-func initTestEnv(t *testing.T) (*DumpServer, *testDumper, string) {
+func initTestEnv(t *testing.T) (*StashServer, *testStasher, string) {
 	logf.SetLogger(zap.New(zap.UseDevMode(true)))
 
-	testDumper := &testDumper{"data"}
-	ds := NewDumpServer(testDumper, 10)
+	testStasher := &testStasher{"data"}
+	ds := NewStashServer(testStasher, 10)
 	dir, err := os.MkdirTemp("", "testtmp")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	ds.dumpDir = dir
-	ds.dumpPrefix = TestFilePrefix
-	return ds, testDumper, dir
+	ds.stashDir = dir
+	ds.stashPrefix = TestFilePrefix
+	return ds, testStasher, dir
 }
 
-func mustCreateDump(t *testing.T, ds *DumpServer) *httptest.ResponseRecorder {
+func mustCreateStash(t *testing.T, ds *StashServer) *httptest.ResponseRecorder {
 	rr := httptest.NewRecorder()
-	request, err := http.NewRequest("POST", "/dumps", nil)
+	request, err := http.NewRequest("POST", "/stashes", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +319,7 @@ func mustCreateDump(t *testing.T, ds *DumpServer) *httptest.ResponseRecorder {
 	return rr
 }
 
-func validateDumpCreated(t *testing.T, expectedNumDumps int, dir string) {
+func validateStashCreated(t *testing.T, expectedNumStashes int, dir string) {
 	// Wait a bit for file IO to happen
 	time.Sleep(600 * time.Millisecond)
 
@@ -335,15 +335,15 @@ func validateDumpCreated(t *testing.T, expectedNumDumps int, dir string) {
 		}
 	}
 
-	if filesFound != expectedNumDumps {
-		t.Errorf("dump server created expected to create %v dump but got %v", expectedNumDumps, filesFound)
+	if filesFound != expectedNumStashes {
+		t.Errorf("stash server created expected to create %v stash but got %v", expectedNumStashes, filesFound)
 	}
 }
 
-func validateGetDumps(t *testing.T, ds *DumpServer, expectedNumDumps int) map[string]*Dump {
+func validateGetStashes(t *testing.T, ds *StashServer, expectedNumStashes int) map[string]*Stash {
 	rr := httptest.NewRecorder()
 
-	request, err := http.NewRequest("GET", "/dumps", nil)
+	request, err := http.NewRequest("GET", "/stashes", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,24 +355,24 @@ func validateGetDumps(t *testing.T, ds *DumpServer, expectedNumDumps int) map[st
 			status, http.StatusCreated)
 	}
 
-	dumps := make(map[string]*Dump)
+	stashes := make(map[string]*Stash)
 
 	responseBody, err := io.ReadAll(rr.Result().Body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	json.Unmarshal(responseBody, &dumps)
+	json.Unmarshal(responseBody, &stashes)
 
-	if dumpsLen := len(dumps); dumpsLen != expectedNumDumps {
-		t.Errorf("unexpected dumps found, expected:%v  got: %v", expectedNumDumps, dumpsLen)
+	if stashesLen := len(stashes); stashesLen != expectedNumStashes {
+		t.Errorf("unexpected stashes found, expected:%v  got: %v", expectedNumStashes, stashesLen)
 	}
-	return dumps
+	return stashes
 }
 
-func validateGetDump(t *testing.T, ds *DumpServer, dumpName string, expectedData []byte) {
+func validateGetStash(t *testing.T, ds *StashServer, stashName string, expectedData []byte) {
 	rr := httptest.NewRecorder()
 
-	request, err := http.NewRequest("GET", "/dumps/"+dumpName, nil)
+	request, err := http.NewRequest("GET", "/stashes/"+stashName, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,6 +386,6 @@ func validateGetDump(t *testing.T, ds *DumpServer, dumpName string, expectedData
 
 	responseBody, err := io.ReadAll(rr.Result().Body)
 	if !bytes.Equal(responseBody, expectedData) {
-		t.Errorf("data expected in dump: %s , data found: %s", string(expectedData), string(responseBody))
+		t.Errorf("data expected in stash: %s , data found: %s", string(expectedData), string(responseBody))
 	}
 }

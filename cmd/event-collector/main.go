@@ -9,9 +9,9 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/couchbase/k8s-event-collector/pkg/config"
-	"github.com/couchbase/k8s-event-collector/pkg/dumpserver"
 	evcol "github.com/couchbase/k8s-event-collector/pkg/event-collector"
 	"github.com/couchbase/k8s-event-collector/pkg/plugins"
+	"github.com/couchbase/k8s-event-collector/pkg/stashserver"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -52,28 +52,28 @@ func main() {
 	addFilterFunction(&eventcollector, cfg.EventFilters, kubeClient)
 	addActionFunc(&eventcollector, cfg)
 
-	// Create and setup dumpServer
-	dumpServer := dumpserver.NewDumpServer(&eventcollector, cfg.MaxDumps)
+	// Create and setup stashServer
+	stashServer := stashserver.NewStashServer(&eventcollector, cfg.MaxStashes)
 	eventcollector.ActionCallback = func(in *corev1.Event) {
-		dumpServer.CreateBufferDump()
+		stashServer.CreateBufferStash()
 	}
-	plugins.AddPlugins(dumpServer, cfg.DumpCompletionPlugins, kubeClient)
+	plugins.AddPlugins(stashServer, cfg.StashCompletionPlugins, kubeClient)
 
 	// Start Server and Logger
 	go func() {
-		dumpServer.Run(cfg.Port)
+		stashServer.Run(cfg.Port)
 	}()
 
 	eventcollector.Run()
 }
 
 func addActionFunc(el *evcol.EventCollector, cfg config.EventCollectorConfiguration) {
-	if cfg.DumpTrigger != nil {
-		eventType := cfg.DumpTrigger.EventType
-		if eventType == "" && cfg.DumpTrigger.EventFilters == nil {
+	if cfg.StashTrigger != nil {
+		eventType := cfg.StashTrigger.EventType
+		if eventType == "" && cfg.StashTrigger.EventFilters == nil {
 			eventType = corev1.EventTypeWarning
 		}
-		configFilterFunc := createFilterFuncFromConfigFilters(cfg.DumpTrigger.EventFilters, el.KubeClient)
+		configFilterFunc := createFilterFuncFromConfigFilters(cfg.StashTrigger.EventFilters, el.KubeClient)
 
 		el.ActionFilterFunc = func(in *corev1.Event) bool {
 			if eventType != "" && in.Type != eventType {
@@ -82,7 +82,7 @@ func addActionFunc(el *evcol.EventCollector, cfg config.EventCollectorConfigurat
 
 			return configFilterFunc(in)
 		}
-	} else if cfg.DumpOnWarnings {
+	} else if cfg.StashOnWarnings {
 		el.ActionFilterFunc = func(in *corev1.Event) bool {
 			return in.Type == corev1.EventTypeWarning
 		}
@@ -137,7 +137,7 @@ func loadConfig() config.EventCollectorConfiguration {
 
 	viper.SetDefault("bufferSize", 100)
 	viper.SetDefault("port", "8080")
-	viper.SetDefault("maxDumps", "20")
+	viper.SetDefault("maxStashes", "20")
 
 	if err != nil {
 		log.Info("WARN: Failed to read config file", "error", err)

@@ -39,7 +39,7 @@ metadata:
 data:
   config.yaml: |
     bufferSize: 1000
-    dumpCompletionPlugins:
+    stashCompletionPlugins:
       kubernetesEvent:
         enabled: false
     eventFilters:
@@ -79,12 +79,12 @@ spec:
         - containerPort: 8080
         volumeMounts:
         - mountPath: /tmp
-          name: dump-volume
+          name: stash-volume
         - mountPath: /etc/eventcollector
           name: config
         readinessProbe:
           httpGet:
-            path: /dumps
+            path: /stashes
             port: 8080
           initialDelaySeconds: 3
           periodSeconds: 3
@@ -94,7 +94,7 @@ spec:
             fieldRef:
               fieldPath: metadata.name
       volumes:
-      - name: dump-volume
+      - name: stash-volume
         emptyDir:
           sizeLimit: 500Mi
       - name: config
