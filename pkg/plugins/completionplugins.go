@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/couchbase/k8s-event-collector/pkg/config"
-	"github.com/couchbase/k8s-event-collector/pkg/dumpserver"
+	"github.com/couchbase/k8s-event-collector/pkg/stashserver"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -17,22 +17,22 @@ import (
 var log = logf.Log.WithName("completion-plugins")
 
 // AddPlugins parses the config and adds the specified plugins
-func AddPlugins(ds *dumpserver.DumpServer, cfg *config.CompletionPluginsConfiguration, kubeClient kubernetes.Interface) {
+func AddPlugins(ss *stashserver.StashServer, cfg *config.CompletionPluginsConfiguration, kubeClient kubernetes.Interface) {
 	if cfg == nil {
 		return
 	}
 
 	if ke := cfg.KubernetesEvent; ke != nil {
 		if ke.Enabled {
-			ds.AddCompletionCallback(func(d *dumpserver.Dump) {
-				CreateDumpEvent(d, kubeClient)
+			ss.AddCompletionCallback(func(d *stashserver.Stash) {
+				CreateStashEvent(d, kubeClient)
 			})
 			log.Info("Added Kubernetes Event Completion plugin")
 		}
 	}
 }
 
-func CreateDumpEvent(d *dumpserver.Dump, c kubernetes.Interface) {
+func CreateStashEvent(d *stashserver.Stash, c kubernetes.Interface) {
 	selfPod := getSelfPod(c)
 
 	if selfPod == nil {
@@ -41,7 +41,7 @@ func CreateDumpEvent(d *dumpserver.Dump, c kubernetes.Interface) {
 
 	t := time.Now()
 
-	msg := fmt.Sprintf("Dump %s created", d.Name)
+	msg := fmt.Sprintf("Stash %s created", d.Name)
 	e := &v1.Event{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: selfPod.Name,
@@ -63,13 +63,13 @@ func CreateDumpEvent(d *dumpserver.Dump, c kubernetes.Interface) {
 		LastTimestamp:  metav1.Time{Time: t},
 		Count:          int32(1),
 		Message:        msg,
-		Reason:         "Dump triggered",
+		Reason:         "Stash triggered",
 	}
 
 	e, err := c.CoreV1().Events("default").Create(context.TODO(), e, metav1.CreateOptions{})
 
 	if err != nil {
-		log.Error(err, "Failed to create K8s dump event")
+		log.Error(err, "Failed to create K8s stash event")
 	}
 }
 

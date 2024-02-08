@@ -2,13 +2,13 @@ package config
 
 // EventCollectorConfiguration is the top level config for the event collector
 type EventCollectorConfiguration struct {
-	Port                  string                          `yaml:"port"`
-	BufferSize            int                             `yaml:"bufferSize"`
-	DumpCompletionPlugins *CompletionPluginsConfiguration `yaml:"dumpCompletionPlugins"`
-	EventFilters          []KubernetesResourceFilter      `yaml:"eventFilter"`
-	DumpOnWarnings        bool                            `yaml:"dumpOnWarningEvents"`
-	DumpTrigger           *DumpTriggerConfiguration       `yaml:"dumpTriggers"`
-	MaxDumps              int                             `yaml:"maxDumps"`
+	Port                   string                          `yaml:"port"`
+	BufferSize             int                             `yaml:"bufferSize"`
+	StashCompletionPlugins *CompletionPluginsConfiguration `yaml:"stashCompletionPlugins"`
+	EventFilters           []KubernetesResourceFilter      `yaml:"eventFilter"`
+	StashOnWarnings        bool                            `yaml:"stashOnWarningEvents"`
+	StashTrigger           *StashTriggerConfiguration      `yaml:"stashTriggers"`
+	MaxStashes             int                             `yaml:"maxStashes"`
 }
 
 // CompletionPluginsConfiguration is the config for the plugins
@@ -28,8 +28,8 @@ type KubernetesResourceFilter struct {
 	Labels     map[string]string `yaml:"labels"`
 }
 
-// DumpTriggerConfiguration is a config for triggering automated dumps
-type DumpTriggerConfiguration struct {
+// StashTriggerConfiguration is a config for triggering automated stashes
+type StashTriggerConfiguration struct {
 	EventType    string
 	EventFilters []KubernetesResourceFilter
 }

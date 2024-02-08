@@ -116,8 +116,8 @@ func (ec *EventCollector) Stop() {
 	}
 }
 
-// Dump writes out the current buffer to the provided writer
-func (ec *EventCollector) Dump(w io.Writer) error {
+// Stash writes out the current buffer to the provided writer
+func (ec *EventCollector) Stash(w io.Writer) error {
 	tmpBuff := make([]*corev1.Event, 0, ec.Buffer.Size())
 
 	ec.Buffer.Do(func(e *corev1.Event) {

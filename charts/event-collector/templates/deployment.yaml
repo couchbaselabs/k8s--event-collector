@@ -6,7 +6,7 @@ data:
   config.yaml: |
     bufferSize: {{ .Values.bufferSize }}
     port: {{ .Values.serverPort }}
-    dumpCompletionPlugins:
+    stashCompletionPlugins:
       kubernetesEvent:
         enabled: false
     {{ if .Values.eventFilters -}}
@@ -42,12 +42,12 @@ spec:
         - containerPort: {{ .Values.serverPort }}
         volumeMounts:
         - mountPath: /tmp
-          name: dump-volume
+          name: stash-volume
         - mountPath: /etc/eventcollector
           name: config
         readinessProbe:
           httpGet:
-            path: /dumps
+            path: /stashes
             port: {{ .Values.serverPort }}
           initialDelaySeconds: 3
           periodSeconds: 3
@@ -57,7 +57,7 @@ spec:
             fieldRef:
               fieldPath: metadata.name
       volumes:
-      - name: dump-volume
+      - name: stash-volume
       {{- if .Values.storage.persistentVolume }}
         persistentVolumeClaim:
           claimName: pvc-{{ .Values.appName }}

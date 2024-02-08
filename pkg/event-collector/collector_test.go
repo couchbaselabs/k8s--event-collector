@@ -132,7 +132,7 @@ func TestCollectorActionFunc(t *testing.T) {
 	}
 }
 
-func TestDump(t *testing.T) {
+func TestStash(t *testing.T) {
 	mockClient, watcher := getMockClient()
 	defer watcher.Stop()
 
@@ -158,11 +158,11 @@ func TestDump(t *testing.T) {
 
 	var builder strings.Builder
 
-	collector.Dump(&builder)
+	collector.Stash(&builder)
 	var readEvents []corev1.Event
 	json.Unmarshal([]byte(builder.String()), &readEvents)
 	if !reflect.DeepEqual(readEvents, events) {
-		t.Errorf("Expected sent events to match dumped events")
+		t.Errorf("Expected sent events to match stashed events")
 	}
 }
 
