@@ -12,6 +12,7 @@ import (
 	evcol "github.com/couchbase/k8s-event-collector/pkg/event-collector"
 	"github.com/couchbase/k8s-event-collector/pkg/plugins"
 	"github.com/couchbase/k8s-event-collector/pkg/stashserver"
+	"github.com/couchbase/k8s-event-collector/pkg/version"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -29,6 +30,7 @@ var log = logf.Log.WithName("main")
 func main() {
 	// Setup Logging
 	logf.SetLogger(zap.New(zap.UseDevMode(false)))
+	log.Info(fmt.Sprintf("Starting %s: %s", version.Application, version.WithBuildNumberAndRevision()))
 
 	// Create Client
 	kubeClient, err := getKubeClient()

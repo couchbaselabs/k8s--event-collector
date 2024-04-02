@@ -1,0 +1,34 @@
+
+FROM registry.access.redhat.com/ubi8/ubi-minimal
+
+ARG TARGETARCH
+
+# ubi-minimal updates frequently and has very few packages installed,
+# so no need for a "security-only" update.
+RUN microdnf update && microdnf clean all
+
+# Add licenses and help file
+RUN mkdir /license
+COPY License.txt /licenses/LICENSE.txt
+COPY README.md /help.1
+
+ARG PROD_VERSION
+ARG PROD_BUILD
+ARG OS_BUILD
+
+# Install Couchbase Exporter
+COPY bin/linux/k8s-event-collector-${TARGETARCH} /usr/local/bin/k8s-event-collector
+
+LABEL name="couchbase/k8s-event-collector" \
+      vendor="Couchbase" \
+      version="${PROD_VERSION}" \
+      openshift_build="${OS_BUILD}" \
+      exporter_build="${PROD_BUILD}" \
+      release="Latest" \
+      summary="K8S Event Collector ${PROD_VERSION}" \
+      description="K8S Event Collector ${PROD_VERSION}" \
+      architecture="x86_64" \
+      run="docker run --rm k8s-event-collector registry.connect.redhat.com/couchbase/k8s-event-collector:${PROD_VERSION}-${OS_BUILD} --help" \
+      io.k8s.description="The K8s Event collector is a process for maintaining k8s events for debugging purposes"
+
+ENTRYPOINT ["k8s-event-collector"]
