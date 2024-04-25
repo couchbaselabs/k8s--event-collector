@@ -19,7 +19,7 @@ helm install event-collector charts/event-collector
 ## API
 
 A REST API can be used to communicate with a KEL instance to view event stashes
-taken as well as triggger new stashes. By default it is served on port 8080
+taken as well as trigger new stashes. By default it is served on port 8080
 
 * List all taken stash
 
