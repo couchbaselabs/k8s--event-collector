@@ -45,4 +45,4 @@ image-artifacts: bins
 dist: image-artifacts
 	    rm -rf dist
 		mkdir -p dist
-		tar -C $(ARTIFACTS)/.. -czf dist/k8s-event-collector-image_$(productVersion).tgz .
+		tar -C $(ARTIFACTS)/.. -czf dist/couchbase-k8s-event-collector-image_$(productVersion).tgz .
